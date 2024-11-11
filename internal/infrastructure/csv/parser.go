@@ -5,12 +5,15 @@ import (
 	"io"
 	"strconv"
 	"time"
+
+	"github.com/EduardoAtene/etl-go-bi/internal/domain/helpers"
 )
 
 // Estruturas auxiliares para organizar os dados antes de criar o fato
 type AcidenteTemp struct {
 	// Dados temporais
 	DataCompleta time.Time
+	DiaSemana    string
 	Hora         string
 	PeriodoDia   string
 
@@ -55,10 +58,10 @@ type AcidenteTemp struct {
 	QtdMortos             int
 }
 
-// ParseAcidentesPRF parse acidentes da PRF
 func ParseAcidentesPRF(file io.Reader) ([]AcidenteTemp, error) {
 	reader := csv.NewReader(file)
-	reader.Comma = ';'
+	reader.Comma = ';'       // O arquivo CSV está separado por tabulação
+	reader.LazyQuotes = true // Permite que o parser ignore problemas com aspas não fechadas
 
 	// Pular cabeçalho
 	_, err := reader.Read()
@@ -77,53 +80,55 @@ func ParseAcidentesPRF(file io.Reader) ([]AcidenteTemp, error) {
 			return nil, err
 		}
 
-		data, err := time.Parse("02/01/2006", record[0])
+		// Parse do campo de data
+		data, err := time.Parse("2006-01-02", record[2]) // "2024-01-01" no formato de data
 		if err != nil {
 			continue
 		}
 
-		km, _ := strconv.Atoi(record[4])
-		idade, _ := strconv.Atoi(record[15])
-		anoFab, _ := strconv.Atoi(record[12])
-		ilesos, _ := strconv.Atoi(record[9])
-		feridosLeves, _ := strconv.Atoi(record[7])
-		feridosGraves, _ := strconv.Atoi(record[8])
-		mortos, _ := strconv.Atoi(record[6])
-		latitude, _ := strconv.ParseFloat(record[13], 64)
-		longitude, _ := strconv.ParseFloat(record[14], 64)
+		// Parse de outros campos
+		km, _ := strconv.Atoi(record[7])                   // 'km' está no índice 7
+		idade, _ := strconv.Atoi(record[19])               // 'idade' está no índice 19
+		anoFab, _ := strconv.Atoi(record[21])              // 'ano_fabricacao_veiculo' está no índice 21
+		ilesos, _ := strconv.Atoi(record[25])              // 'ilesos' está no índice 25
+		feridosLeves, _ := strconv.Atoi(record[26])        // 'feridos_leves' está no índice 26
+		feridosGraves, _ := strconv.Atoi(record[27])       // 'feridos_graves' está no índice 27
+		mortos, _ := strconv.Atoi(record[28])              // 'mortos' está no índice 28
+		latitude, _ := strconv.ParseFloat(record[31], 64)  // 'latitude' está no índice 31
+		longitude, _ := strconv.ParseFloat(record[32], 64) // 'longitude' está no índice 32
 
 		acidente := AcidenteTemp{
 			DataCompleta:          data,
-			Hora:                  record[1],
-			PeriodoDia:            record[2],
-			Municipio:             record[3],
-			BR:                    record[4],
+			DiaSemana:             helpers.RemoveSpecialChars(record[3]),  // dia_semana
+			Hora:                  helpers.RemoveSpecialChars(record[4]),  // horario
+			PeriodoDia:            helpers.RemoveSpecialChars(record[10]), // fase_di
+			BR:                    helpers.RemoveSpecialChars(record[5]),  // br
 			KM:                    km,
-			Latitude:              latitude,
-			Longitude:             longitude,
-			Regional:              record[16],
-			Delegacia:             record[17],
-			UOP:                   record[18],
-			TipoVeiculo:           record[10],
-			Marca:                 record[11],
+			Municipio:             helpers.RemoveSpecialChars(record[7]),  // municipio
+			CausaAcidente:         helpers.RemoveSpecialChars(record[8]),  // causa_acidente
+			TipoAcidente:          helpers.RemoveSpecialChars(record[9]),  // tipo_acidente
+			ClassificacaoAcidente: helpers.RemoveSpecialChars(record[10]), // classificacao_acidente
+			SentidoVia:            helpers.RemoveSpecialChars(record[11]), // sentido_via
+			CondicaoMetereologica: helpers.RemoveSpecialChars(record[12]), // condicao_metereologica
+			TipoPista:             helpers.RemoveSpecialChars(record[13]), // tipo_pista
+			TracadoVia:            helpers.RemoveSpecialChars(record[14]), // tracado_via
+			UsoSolo:               helpers.RemoveSpecialChars(record[15]), // uso_solo
+			TipoVeiculo:           helpers.RemoveSpecialChars(record[17]), // tipo_veiculo
+			Marca:                 helpers.RemoveSpecialChars(record[18]), // marca
 			AnoFabricacao:         anoFab,
-			TipoEnvolvido:         record[14],
+			TipoEnvolvido:         helpers.RemoveSpecialChars(record[20]), // tipo_envolvido
+			EstadoFisico:          helpers.RemoveSpecialChars(record[21]), // estado_fisico
 			Idade:                 idade,
-			Sexo:                  record[19],
-			RacaCor:               record[20],
-			EstadoFisico:          record[21],
-			CondicaoMetereologica: record[22],
-			TipoPista:             record[23],
-			TracadoVia:            record[24],
-			UsoSolo:               record[25],
-			SentidoVia:            record[26],
-			CausaAcidente:         record[27],
-			TipoAcidente:          record[28],
-			ClassificacaoAcidente: record[29],
+			Sexo:                  helpers.RemoveSpecialChars(record[22]), // sexo
 			QtdIlesos:             ilesos,
 			QtdFeridosLeves:       feridosLeves,
 			QtdFeridosGraves:      feridosGraves,
 			QtdMortos:             mortos,
+			Latitude:              latitude,
+			Longitude:             longitude,
+			Regional:              helpers.RemoveSpecialChars(record[29]), // regional
+			Delegacia:             helpers.RemoveSpecialChars(record[30]), // delegacia
+			UOP:                   helpers.RemoveSpecialChars(record[31]), // uop
 		}
 
 		acidentes = append(acidentes, acidente)
@@ -163,11 +168,11 @@ func ParseAcidentesSESMG(file io.Reader) ([]AcidenteTemp, error) {
 
 		acidente := AcidenteTemp{
 			DataCompleta:          data,
-			Municipio:             record[1],
+			Municipio:             record[6],
 			Idade:                 idade,
-			Sexo:                  record[4],
-			RacaCor:               record[5],
-			CausaAcidente:         record[6],
+			Sexo:                  record[3],
+			RacaCor:               record[4],
+			CausaAcidente:         record[8],
 			CIDCausaMorte:         record[7],
 			DescCausaMorte:        record[8],
 			QtdMortos:             1,

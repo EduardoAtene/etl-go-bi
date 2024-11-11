@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/EduardoAtene/etl-go-bi/internal/domain/entity"
 )
@@ -15,14 +16,24 @@ func NewDimTempoRepository(db *sql.DB) *DimTempoRepository {
 }
 
 func (repo *DimTempoRepository) Insert(dimTempo *entity.DimTempo) (int, error) {
-	query := `INSERT INTO Dim_Tempo (data_completa, ano, mes, dia, dia_semana, hora, periodo_dia)
-			  VALUES (?, ?, ?, ?, ?, ?, ?)
-			  RETURNING id_tempo`
+	// Converte a hora para o formato "hh:mm:ss"
+	horaFormatada := dimTempo.Hora.Format("15:04:05") // Formato de hora
 
-	var id int
-	err := repo.db.QueryRow(query, dimTempo.DataCompleta, dimTempo.Ano, dimTempo.Mes, dimTempo.Dia,
-		dimTempo.DiaSemana, dimTempo.Hora, dimTempo.PeriodoDia).Scan(&id)
+	query := `INSERT INTO Dim_Tempo (data_completa, ano, mes, dia, dia_semana, hora, periodo_dia)
+			  VALUES (?, ?, ?, ?, ?, ?, ?)`
+
+	_, err := repo.db.Exec(query, dimTempo.DataCompleta, dimTempo.Ano, dimTempo.Mes, dimTempo.Dia,
+		dimTempo.DiaSemana, horaFormatada, dimTempo.PeriodoDia)
 	if err != nil {
+		fmt.Println(err)
+		return 0, err
+	}
+
+	// Obtém o último id inserido
+	var id int
+	err = repo.db.QueryRow("SELECT LAST_INSERT_ID()").Scan(&id)
+	if err != nil {
+		fmt.Println(err)
 		return 0, err
 	}
 

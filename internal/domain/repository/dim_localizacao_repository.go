@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/EduardoAtene/etl-go-bi/internal/domain/entity"
 )
@@ -15,15 +16,23 @@ func NewDimLocalizacaoRepository(db *sql.DB) *DimLocalizacaoRepository {
 }
 
 func (repo *DimLocalizacaoRepository) Insert(dimLocalizacao *entity.DimLocalizacao) (int, error) {
+	// Query de inserção sem o RETURNING
 	query := `INSERT INTO Dim_Localizacao (municipio, br, km, latitude, longitude, regional, delegacia, uop)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			  RETURNING id_localizacao`
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
-	var id int
-	err := repo.db.QueryRow(query, dimLocalizacao.Municipio, dimLocalizacao.BR, dimLocalizacao.KM,
+	_, err := repo.db.Exec(query, dimLocalizacao.Municipio, dimLocalizacao.BR, dimLocalizacao.KM,
 		dimLocalizacao.Latitude, dimLocalizacao.Longitude, dimLocalizacao.Regional,
-		dimLocalizacao.Delegacia, dimLocalizacao.UOP).Scan(&id)
+		dimLocalizacao.Delegacia, dimLocalizacao.UOP)
 	if err != nil {
+		fmt.Println(err)
+		return 0, err
+	}
+
+	// Obtém o último id inserido
+	var id int
+	err = repo.db.QueryRow("SELECT LAST_INSERT_ID()").Scan(&id)
+	if err != nil {
+		fmt.Println(err)
 		return 0, err
 	}
 

@@ -1,0 +1,241 @@
+package handler
+
+import (
+	"encoding/csv"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/EduardoAtene/etl-go-bi/internal/domain/entity"
+	"github.com/EduardoAtene/etl-go-bi/internal/domain/repository"
+	"github.com/EduardoAtene/etl-go-bi/internal/usecase"
+	"github.com/gin-gonic/gin"
+)
+
+type UploadHandler struct {
+	uploadUseCase   *usecase.UploadUseCase
+	fatoRepo        *repository.FatoAcidentesRepository
+	tempoRepo       *repository.DimTempoRepository
+	veiculoRepo     *repository.DimVeiculoRepository
+	pessoaRepo      *repository.DimPessoaRepository
+	condicaoRepo    *repository.DimCondicoesRepository
+	localizacaoRepo *repository.DimLocalizacaoRepository
+}
+
+func NewUploadHandler(
+	uploadUseCase *usecase.UploadUseCase,
+	fatoRepo *repository.FatoAcidentesRepository,
+	tempoRepo *repository.DimTempoRepository,
+	veiculoRepo *repository.DimVeiculoRepository,
+	pessoaRepo *repository.DimPessoaRepository,
+	condicaoRepo *repository.DimCondicoesRepository,
+	localizacaoRepo *repository.DimLocalizacaoRepository,
+) *UploadHandler {
+	return &UploadHandler{
+		uploadUseCase:   uploadUseCase,
+		fatoRepo:        fatoRepo,
+		tempoRepo:       tempoRepo,
+		veiculoRepo:     veiculoRepo,
+		pessoaRepo:      pessoaRepo,
+		condicaoRepo:    condicaoRepo,
+		localizacaoRepo: localizacaoRepo,
+	}
+}
+
+func (h *UploadHandler) HandlePRF(c *gin.Context) {
+	file, err := c.FormFile("acidentes_prf")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "arquivo de acidentes PRF não fornecido"})
+		return
+	}
+
+	err = h.uploadUseCase.ProcessPRFData(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "dados PRF importados com sucesso"})
+}
+
+func (h *UploadHandler) HandleSESMG(c *gin.Context) {
+	// Ler arquivo CSV
+	file, _, err := c.Request.FormFile("acidentes_sesmg")
+	if err != nil {
+		fmt.Printf("Error reading file: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file"})
+		return
+	}
+	defer file.Close()
+
+	// Criar o reader CSV
+	reader := csv.NewReader(file)
+	var lineCount int
+
+	// Processar as linhas do CSV
+	for {
+		lineCount++
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading CSV line %d: %v", lineCount, err)
+			continue
+		}
+
+		// Preencher entidades com dados do CSV, tratando valores ausentes com NULL
+		// Este exemplo assume que você tenha as colunas no CSV correspondentes
+		// aos campos das entidades.
+		fatoAcidente := &entity.FatoAcidentes{
+			IDTempo:               h.parseInt(record[0]),
+			IDLocalizacao:         h.parseInt(record[1]),
+			IDVeiculo:             h.parseInt(record[2]),
+			IDPessoa:              h.parseInt(record[3]),
+			IDCondicoes:           h.parseInt(record[4]),
+			FonteDados:            record[5],
+			CausaAcidente:         record[6],
+			TipoAcidente:          record[7],
+			ClassificacaoAcidente: record[8],
+			CIDCausaMorte:         record[9],
+			DescCausaMorte:        record[10],
+			QtdIlesos:             h.parseInt(record[11]),
+			QtdFeridosLeves:       h.parseInt(record[12]),
+			QtdFeridosGraves:      h.parseInt(record[13]),
+			QtdMortos:             h.parseInt(record[14]),
+		}
+
+		// Inserir no banco de dados
+		_, err = h.fatoRepo.Insert(fatoAcidente)
+		if err != nil {
+			log.Printf("Error inserting FatoAcidentes: %v", err)
+			continue
+		}
+
+		// Inserir DimVeiculo
+		dimVeiculo := &entity.DimVeiculo{
+			TipoVeiculo:   record[2],
+			Marca:         record[3],
+			AnoFabricacao: h.parseInt(record[4]),
+		}
+		_, err = h.veiculoRepo.Insert(dimVeiculo)
+		if err != nil {
+			log.Printf("Error inserting DimVeiculo: %v", err)
+			continue
+		}
+
+		// Inserir DimTempo
+		dimTempo := &entity.DimTempo{
+			// DataCompleta: record[0],
+			DataCompleta: h.parseDate(record[0]),
+			Ano:          h.parseInt(record[1]),
+			Mes:          h.parseInt(record[2]),
+			Dia:          h.parseInt(record[3]),
+			DiaSemana:    record[4],
+			Hora:         h.parseTime(record[5]),
+			PeriodoDia:   record[6],
+		}
+		_, err = h.tempoRepo.Insert(dimTempo)
+		if err != nil {
+			log.Printf("Error inserting DimTempo: %v", err)
+			continue
+		}
+
+		// Inserir DimPessoa
+		dimPessoa := &entity.DimPessoa{
+			TipoEnvolvido:       record[7],
+			Idade:               h.parseInt(record[8]),
+			Sexo:                record[9],
+			RacaCor:             record[10],
+			EstadoFisico:        record[11],
+			MunicipioResidencia: record[12],
+		}
+		_, err = h.pessoaRepo.Insert(dimPessoa)
+		if err != nil {
+			log.Printf("Error inserting DimPessoa: %v", err)
+			continue
+		}
+
+		// Inserir DimLocalizacao
+		dimLocalizacao := &entity.DimLocalizacao{
+			Municipio: record[13],
+			BR:        record[14],
+			KM:        h.parseInt(record[15]),
+			Latitude:  h.parseFloat(record[16]),
+			Longitude: h.parseFloat(record[17]),
+			Regional:  record[18],
+			Delegacia: record[19],
+			UOP:       record[20],
+		}
+		_, err = h.localizacaoRepo.Insert(dimLocalizacao)
+		if err != nil {
+			log.Printf("Error inserting DimLocalizacao: %v", err)
+			continue
+		}
+
+		// Inserir DimCondicoes
+		dimCondicoes := &entity.DimCondicoes{
+			CondicaoMeteorologica: record[21],
+			TipoPista:             record[22],
+			TracadoVia:            record[23],
+			UsoSolo:               record[24],
+			SentidoVia:            record[25],
+		}
+		_, err = h.condicaoRepo.Insert(dimCondicoes)
+		if err != nil {
+			log.Printf("Error inserting DimCondicoes: %v", err)
+			continue
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data imported successfully"})
+}
+
+// Função auxiliar para tratar valores ausentes
+func (h *UploadHandler) parseInt(value string) int {
+	if value == "" {
+		return 0 // Retorna 0 para valores ausentes
+	}
+	result, err := strconv.Atoi(value)
+	if err != nil {
+		return 0 // Se falhar na conversão, retorna 0
+	}
+	return result
+}
+
+// Função auxiliar para tratar valores ausentes para float
+func (h *UploadHandler) parseFloat(value string) float64 {
+	if value == "" {
+		return 0.0 // Retorna 0.0 para valores ausentes
+	}
+	result, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0.0 // Se falhar na conversão, retorna 0.0
+	}
+	return result
+}
+
+func (h *UploadHandler) parseDate(value string) time.Time {
+	if value == "" {
+		return time.Time{} // Retorna uma data vazia para valores ausentes
+	}
+	t, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{} // Se falhar na conversão, retorna uma data vazia
+	}
+	return t
+}
+
+func (h *UploadHandler) parseTime(value string) time.Time {
+	if value == "" {
+		return time.Time{} // Retorna uma data vazia para valores ausentes
+	}
+	t, err := time.Parse("15:04:05", value)
+	if err != nil {
+		return time.Time{} // Se falhar na conversão, retorna uma data vazia
+	}
+	return t
+}
