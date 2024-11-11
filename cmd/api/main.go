@@ -26,8 +26,9 @@ func main() {
 
 	api := router.Group("/api/v1")
 	{
-		api.POST("/upload", uploadHandler.Handle)
+		api.POST("/upload/prf", uploadHandler.HandlePRF)
+		api.POST("/upload/sesmg", uploadHandler.HandleSESMG)
 	}
 
-	log.Fatal(router.Run(":8080"))
+	log.Fatal(router.Run(":8081"))
 }
